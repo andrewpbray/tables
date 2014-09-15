@@ -1,0 +1,186 @@
+---
+title: "Three approaches to 2x2 table analysis"
+author: Andrew Bray
+date: Tuesday, June 03, 2014
+output: html_document
+---
+
+```{r global_options, include=FALSE}
+library(RColorBrewer)
+library(knitr)
+opts_chunk$set(fig.align = "center", cache = TRUE, fig.width = 5, fig.height = 4)
+```
+
+
+#### Objective:
+To compare the conclusions that from three types of 2x2 table analysis.
+
+1. A traditional randomization model for independence on a two-way table using one of the cell counts as the test statistic.
+2. An alternative model for independence where you don't condition on the table margin.
+3. A third model that neither conditions on the table margin nor assumes perfect knowledge of the parameter.
+
+### Model 1: Traditional Randomization Test
+This example is based on the MythBusters segment which investigates whether yawning is contagious.  A sample of 50 people is randomly divided into two groups.  In both groups the subjects are shown into a room to wait and are secretly videoed.  In treatment group, the person that shows them to the room seeds them with a yawn.  Subjects in the control group are exposed to no such yawn.  Researchers then note which of the subjects yawn.
+
+We generate an "observed" data set using an assumed probability vector that $P(yawn | unseeded) = 0.32$ and $P(yawn | seeded) = 0.30$.
+
+```{r}
+set.seed(145)
+n <- 50
+treatment <- c(rep(c("seeded", "unseeded"), c(n/2, n/2)))
+p <- c(0.32, 0.30)
+
+# generate single data set
+outcomeS <- sample(c("yawn", "no_yawn"), size = n/2, replace = TRUE,
+                   prob = c(p[1], 1 - p[1])) # generate yawners in seeded group
+outcomeU <- sample(c("yawn", "no_yawn"), size = n/2, replace = TRUE,
+                   prob = c(p[2], 1 - p[2])) # generate yawners in unseeded group
+outcome <- c(outcomeS, outcomeU)
+obs_stat <- table(treatment, outcome)[1, 2]
+nYawn <- sum(table(treatment, outcome)[, 2])
+tab <- table(treatment, outcome)
+tab
+```
+
+We perform a traditional randomization test for indepedence (an approximation to Fisher's Exact Test) by conditioning on the table margins and simply shuffling the outcome vector.  The test statistic being used is the number of subjects in the seeded group that yawn.
+
+```{r}
+it <- 50000
+stat1 <- rep(NA, it)
+for(i in 1:it) {
+  outcome_shuffled <- sample(outcome)
+  stat1[i] <- table(treatment, outcome_shuffled)[1, 2]
+}
+barplot(table(stat1))
+```
+
+The result is a sample distribution of counts under this model, which we can then use to put the observed count of `r obs_stat` in context.  If we are interested in computing a two-tailed p-value here, we get `r mean(stat1 >= obs_stat)*2`.
+
+This model is fully specified by the following four characteristics:
+
+1. $P(yawn | unseeded) = P(yawn | seeded) =  P(yawn)$
+2. $P(yawn) = \hat{P}(yawn) = `r nYawn`/50$
+3. Generates samples of size $n$.
+4. Total number of yawners is `r nYawn`.
+5. The total number of subjects in each treatment group is 25.
+
+-----
+
+### Model 2: Less Constrained Randomization
+Now we consider a slightly different model based on a reconsideration of the four characteristics above.  Characteristic 3 and 5 are important to retain as that is part of the experimental design.  Characteristic 1 is important as it articulates a theory of interest.  Characteristic 2 is a bit of a leap.  Why would we think this particular $\hat{P}$ is the right value for $P$?  This could be addressed by considering a distribution on $P$, but we'll leave that as is for now.
+
+Let's look instead at the fourth characteristic, which seems like a vestige of computational convenience and without any good justification.  The following routine eliminates that characteristic and generates the resulting sampling distribution of the same cell count.
+
+```{r}
+stat2 <- rep(NA, it)
+pYawn <- nYawn/n # characteristic 2
+for(i in 1:it) {
+  outcome <- sample(c("yawn", "no_yawn"), size = n, replace = TRUE,
+                   prob = c(pYawn, 1 - pYawn)) # characteristics 1 and 3
+  stat2[i] <- sum(outcome[1:(n/2)] == "yawn") # test statistic
+}
+barplot(table(stat2))
+```
+
+For the ease of comparison, let's looks at those two sampling distributions on top of one another as smooth functions.
+
+```{r echo = FALSE}
+ccc <- c(brewer.pal(5, "Set1")[1:2], brewer.pal(5, "Greens")[3:5])
+d1 <- density(stat1, bw = .7)
+d2 <- density(stat2, bw = .7)
+plot(NA, type = "n", xlim = c(0, max(max(d1$x), max(d2$x))), ylim = c(0, max(max(d1$y), max(d2$y))), xlab = "number of yawners in seeded group", ylab = "density", bty = "n", yaxt = "n")#, xaxt = "n")
+lines(d1$x, d1$y, col = ccc[1], lwd = 2)
+lines(d2$x, d2$y, col = ccc[2], lwd = 2)
+abline(v = obs_stat, col = "darkgray", lty = 2)
+text(7.5, .19, "model 1")
+text(3.6, .04, "model 2")
+```
+
+It's clear that eliminating characteristic 4 of model 1 results in more variation working its way into the sampling distribution.
+For comparison's sake, the two-tailed p-value under this less-constrained model (in gold) is `r mean(stat2 >= obs_stat)*2`, which is roughly twice that of model 1.  One assumes that if charteristic 2 were changed to reflect the uncertainty in the parameter $P(yawn)$, yet more variation would find its way into the sampling distribution.
+
+This leaves me with the question: why have I been teaching model 1 when model 2 seems like a more reasonable approach?
+
+-----
+
+### Model 3: Allow $P(yawn)$ to vary
+
+We consider a third model in which $P(yawn)$ is drawn from a probability distribution that relects our uncertainty in the true parameter.  The conditions of the model can be written as:
+
+1. $P(yawn | unseeded) = P(yawn | seeded) =  P(yawn)$
+2. $P(yawn) \sim f$
+3. Generates samples of size $n$.
+4. The total number of subjects in each treatment group is 25.
+
+We'll look at three distributions for $f$, each one a beta distribution with the mean set to $\hat{P}(yawn) = `r pYawn`$ but with different variances.
+
+```{r, echo=FALSE}
+alphas <- pYawn * c(4, 10, 100)
+betas <- c(4, 10, 100) - alphas
+x <- seq(0, 1, .001)
+fx1 <- dbeta(x, alphas[1], betas[1])
+fx2 <- dbeta(x, alphas[2], betas[2])
+fx3 <- dbeta(x, alphas[3], betas[3])
+plot(NA, type = "n", xlim = c(0, 1), ylim = c(0, max(fx3)), xlab = "P(yawn)", ylab = "density", bty = "n", yaxt = "n")#, xaxt = "n")
+lines(x, fx1, col = ccc[3], lwd = 2)
+lines(x, fx2, col = ccc[4], lwd = 2)
+lines(x, fx3, col = ccc[5], lwd = 2)
+```
+
+
+```{r}
+stat3 <- matrix(rep(NA, it * 3), ncol = 3)
+for(j in 1:3) {
+  for(i in 1:it) {
+    pYawn <- rbeta(1, alphas[j], betas[j]) # characteristic 2
+    outcome <- sample(c("yawn", "no_yawn"), size = n, replace = TRUE,
+                   prob = c(pYawn, 1 - pYawn)) # characteristics 1 and 3
+    stat3[i, j] <- sum(outcome[1:(n/2)] == "yawn") # test statistic
+  }
+}
+```
+
+Below we add the distributions of number of yawners in the seeded group resulting from these three choices (in greens) to the previous two sampling distributions.
+
+```{r echo = FALSE}
+d1 <- density(stat1, bw = .7)
+d2 <- density(stat2, bw = .7)
+d3 <- density(stat3[, 1], bw = 1)
+d4 <- density(stat3[, 2], bw = 1)
+d5 <- density(stat3[, 3], bw = 1)
+plot(NA, type = "n", xlim = c(0, max(max(d1$x), max(d2$x))), ylim = c(0, max(max(d1$y), max(d2$y))), xlab = "number of yawners in seeded group", ylab = "density", bty = "n", yaxt = "n")#, xaxt = "n")
+lines(d1$x, d1$y, col = ccc[1], lwd = 2)
+lines(d2$x, d2$y, col = ccc[2], lwd = 2)
+lines(d3$x, d3$y, col = ccc[3], lwd = 2)
+lines(d4$x, d4$y, col = ccc[4], lwd = 2)
+lines(d5$x, d5$y, col = ccc[5], lwd = 2)
+abline(v = obs_stat, col = "darkgray", lty = 2)
+```
+
+It's evident that if we allow our uncertainty in $P$ to be reflected in the model, the model can reasonably explain most results that could possibly emerge from this experiment.
+
+
+-----
+### 4. The Likelihood Approach (Under Construction)
+```{r, echo = FALSE, fig.height=4.4, fig.width=4}
+pYgS <- seq(0, 1, .001)
+pYgU <- seq(0, 1, .001)
+fn <- function(pYgS, pYgU) {
+  dbinom(tab[1, 2], 25, pYgS) * dbinom(tab[2, 2], 25, pYgU)
+  }
+z <- outer(pYgS, pYgU, FUN = fn)
+image(z, col = brewer.pal(9, "OrRd"), bty = "n")
+lines(x = c(0, 1), y = c(0, 1), lwd = 5, col = brewer.pal(5, "Blues")[2])
+```
+
+
+
+```{r, echo = FALSE, fig.height=4.4, fig.width=4}
+plot(NA, type = "n", xlim = c(0, 1), ylim = c(0, 1), xlab = "P(yawn|seeded)", ylab = "P(yawn|unseeded)", bty = "n", cex.axis = .8, cex.lab = .8)
+lines(x = c(0, 1), y = c(0, 1), lwd = 5, col = brewer.pal(5, "Blues")[2])
+points(x = pYawn, y = pYawn, pch = 16)
+points(x = pYawn, y = pYawn, cex = 2)
+rect(0, 0, 1, 1)
+```
+
+

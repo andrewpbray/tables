@@ -1,0 +1,190 @@
+---
+title: "Valid Models for 2x2 Tables"
+author: Andrew Bray
+date: Sunday, June 08, 2014
+output: html_document
+---
+
+```{r global_options, include=FALSE}
+library(RColorBrewer)
+library(knitr)
+opts_chunk$set(fig.align = "center", fig.width = 5, fig.height = 4, size = "footnotesize")
+```
+
+Our aim is to assess the validity of the three models for two-way tables that are discussed in [this report](http://rpubs.com/apbray/19154).  We do this by evaluating the conjecture that if we simulate data such as we might find in a two-way table, and if we apply one of these models to find the tail area associated with that observation, that the distribution of the resulting p-values will be approximately uniform.  The more specific conjecture is that this uniformity will hold when applied to the first model, but not the second.
+
+### Context for the simulation
+To figure out what the appropriate approach is to simulating this data, we consider a specific problem context such as that used in the textbook.
+
+#### Scenario B
+"The participants in this study were 48 male bank supervisors attending a management institute at the University of North Carolina in 1972. They were asked to assume the role of the personnel director of a bank and were given a personnel file to judge whether the person should be promoted to a branch manager position. The files given to the participants were identical, except that half of them indicated the candidate was male and the other half indicated the candidate was female. These files were randomly assigned to the subjects.
+
+For each supervisor we recorded the gender associated with the assigned file and the promotion decision. Using the results of the study summarized in Table 2.1, we would like to evaluate if females are unfairly discriminated against in promotion decisions. In this study, a smaller proportion of females are promoted than males (0.583 versus 0.875), but it is unclear whether the difference provides convincing evidence that females are unfairly discriminated against."
+
+
+It will be useful to consider two additional scenarios that differ only slightly from the scenario A.
+
+#### Scenario A
+Same as A but where the decisions are being made by a single entity, say the board of the bank, with the proviso that they must promote a total of 12 candidates (assume that it is possible to put together otherwise identical files).
+
+#### Scenario C
+Same as A but where the 48 files were sampled randomly from a large population of files that had been paired up between genders for being otherwise identical.  In the population of files, there is an even gender split.
+
+-----
+
+### Code for the simulations
+
+Each of the simulations below generates data according to the above scenarios with the assumption that promotion is independent of gender, or $P(promote|male) = P(promote|female) = P(promote)$.  We will set $P(promote) = 0.25$.
+
+
+#### Scenario A
+```{r, scenarioA}
+simA <- function(n) {
+  gender <- rep(c("female", "male"), c(n/2, n/2))
+  decision <- sample(rep(c("promote", "no promote"), c(0.25 * n, 0.75 * n)))
+  matrix(c(gender, decision), ncol = 2)
+}
+```
+
+
+#### Scenario B
+```{r, scenarioB}
+simB <- function(n, pPromote) {
+  gender <- rep(c("female", "male"), c(n/2, n/2))
+  decision <- sample(c("promote", "no promote"), size = n, replace = TRUE, prob = c(pPromote, 1 - pPromote))
+  matrix(c(gender, decision), ncol = 2)
+}
+```
+
+
+#### Scenario C
+```{r, scenarioC}
+simC <- function(n, pPromote) {
+  gender <- sample(c("female", "male"), size = n, replace = TRUE, prob = c(.5, .5))
+  decision <- sample(c("promote", "no promote"), size = n, replace = TRUE, prob = c(pPromote, 1 - pPromote))
+  matrix(c(gender, decision), ncol = 2)
+}
+```
+
+-----
+
+### Code for the models
+
+#### Model 1
+
+```{r model1}
+mod1 <- function(sim, it) {
+  stat_obs <- table(sim[, 1], sim[, 2])[1, 2]
+  stats_sim <- rep(NA, it)
+  for(i in 1:it) {
+    decision_shuffled <- sample(sim[, 2])
+    stats_sim[i] <- sum(decision_shuffled[1:(n/2)] == "promote")
+  }
+  mean(stats_sim < stat_obs)
+}
+```
+
+#### Model 2
+
+Note for Model 2 we use $\hat{P}(promote)$, the observed proportion in the simulated data.
+
+```{r model2}
+mod2 <- function(sim, it) {
+  stat_obs <- table(sim[, 1], sim[, 2])[1, 2]
+  pHatPromote <- sum(table(sim[, 1], sim[, 2])[, 2])/n
+  stats_sim <- rep(NA, it)
+  for(i in 1:it) {
+  decision <- sample(c("promote", "no_promote"), size = n, replace = TRUE,
+                   prob = c(pHatPromote, 1 - pHatPromote))
+  stats_sim[i] <- sum(decision[1:(n/2)] == "promote")
+  }
+  mean(stats_sim < stat_obs)
+}
+```
+
+#### Model 3
+
+Note for Model 3 we use the true proportion $P(promote)$, the observed proportion in the simulated data.
+
+```{r model3}
+mod3 <- function(sim, it) {
+  stat_obs <- table(sim[, 1], sim[, 2])[1, 2]
+  stats_sim <- rep(NA, it)
+  for(i in 1:it) {
+  decision <- sample(c("promote", "no_promote"), size = n, replace = TRUE,
+                   prob = c(pPromote, 1 - pPromote))
+  stats_sim[i] <- sum(decision[1:(n/2)] == "promote")
+  }
+  mean(stats_sim < stat_obs)
+}
+```
+
+
+----
+
+### Simulation results
+
+```{r runSims, cache=TRUE, echo=FALSE}
+n <- 480
+pPromote <- .25
+it <-  5000
+nPvals <- 2000
+set.seed(49)
+
+PvalMat <- matrix(rep(NA, nPvals * 6), ncol = 6)
+
+for(j in 1:nPvals) {
+  sim <- simA(n)
+  PvalMat[j, 1] <- mod1(sim, it)
+}
+
+for(j in 1:nPvals) {
+  sim <- simB(n, pPromote)
+  PvalMat[j, 2] <- mod1(sim, it)
+}
+
+for(j in 1:nPvals) {
+  sim <- simA(n)
+  PvalMat[j, 3] <- mod2(sim, it)
+}
+
+for(j in 1:nPvals) {
+  sim <- simB(n, pPromote)
+  PvalMat[j, 4] <- mod2(sim, it)
+}
+
+for(j in 1:nPvals) {
+  sim <- simA(n)
+  PvalMat[j, 5] <- mod3(sim, it)
+}
+
+for(j in 1:nPvals) {
+  sim <- simB(n, pPromote)
+  PvalMat[j, 6] <- mod3(sim, it)
+}
+
+```
+
+```{r vizSimResults, echo=FALSE, fig.align='center', fig.width=8, fig.height=9}
+par(mfrow = c(2, 3))
+hist(PvalMat[, 1], main = "simA : mod1", col = "grey", xlab = "", ylab = "")
+hist(PvalMat[, 2], main = "simB : mod1", col = "grey", xlab = "", ylab = "")
+hist(PvalMat[, 3], main = "simA : mod2", col = "grey", xlab = "", ylab = "")
+hist(PvalMat[, 4], main = "simB : mod2", col = "grey", xlab = "", ylab = "")
+hist(PvalMat[, 5], main = "simA : mod3", col = "grey", xlab = "", ylab = "")
+hist(PvalMat[, 6], main = "simB : mod3", col = "grey", xlab = "", ylab = "")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+

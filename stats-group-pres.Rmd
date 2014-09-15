@@ -1,0 +1,135 @@
+---
+title: "Valid models for tables"
+author: Andrew Bray
+date: Wednesday, June 11, 2014
+output:
+  ioslides_presentation:
+    incremental: true
+---
+
+
+
+---
+
+### Scenario B
+"The participants in this study were 48 male bank supervisors attending a management institute at the University of North Carolina in 1972. They were asked to assume the role of the personnel director of a bank and were given a personnel file to judge whether the person should be promoted to a branch manager position. The files given to the participants were identical, except that half of them indicated the candidate was male and the other half indicated the candidate was female. These files were randomly assigned to the subjects.
+
+For each supervisor we recorded the gender associated with the assigned file and the promotion decision. Using the results of the study summarized in Table 2.1, we would like to evaluate if females are unfairly discriminated against in promotion decisions. In this study, a smaller proportion of females are promoted than males (0.583 versus 0.875), but it is unclear whether the difference provides convincing evidence that females are unfairly discriminated against."
+
+---
+
+### Scenario A
+Same as A but where the decisions are being made by a single entity, say the board of the bank, with the proviso that they must promote a total of 12 candidates (assume that it is possible to put together otherwise identical files).
+
+### Scenario C
+Same as A but where the 48 files were sampled randomly from a large population of files that has an even gender split.
+
+---
+
+## How do we know if our Model is Valid?
+
+* Generating function: $X \sim f$, with corresponding c.d.f. $F$.
+* Model: based on $X$, we fit $g$, with c.d.f. $G$.
+* If our model is the same as the generator, $G(X) \sim Unif(0,1)$
+
+```{r, fig.height = 2, fig.width = 3, eval=FALSE}
+hist(pnorm(rnorm(100000)))
+```
+
+
+---
+
+### Model 1
+
+```{r model1}
+mod1 <- function(sim, it) {
+  stat_obs <- table(sim[, 1], sim[, 2])[1, 2]
+  stats_sim <- rep(NA, it)
+  for(i in 1:it) {
+    decision_shuffled <- sample(sim[, 2])
+    stats_sim[i] <- sum(decision_shuffled[1:(n/2)] == "promote")
+  }
+  mean(stats_sim < stat_obs)
+}
+```
+
+---
+
+### Model 2
+
+Use $\hat{P}(promote)$, the observed proportion in the simulated data.
+
+```{r model2}
+mod2 <- function(sim, it) {
+  stat_obs <- table(sim[, 1], sim[, 2])[1, 2]
+  pHatPromote <- sum(table(sim[, 1], sim[, 2])[, 2])/n
+  stats_sim <- rep(NA, it)
+  for(i in 1:it) {
+  decision <- sample(c("promote", "no_promote"), size = n, replace = TRUE,
+                   prob = c(pHatPromote, 1 - pHatPromote))
+  stats_sim[i] <- sum(decision[1:(n/2)] == "promote")
+  }
+  mean(stats_sim < stat_obs)
+}
+```
+
+---
+
+### Model 3
+
+Use the true proportion $P(promote)$.
+
+```{r model3}
+mod3 <- function(sim, it) {
+  stat_obs <- table(sim[, 1], sim[, 2])[1, 2]
+  stats_sim <- rep(NA, it)
+  for(i in 1:it) {
+  decision <- sample(c("promote", "no_promote"), size = n, replace = TRUE,
+                   prob = c(pPromote, 1 - pPromote))
+  stats_sim[i] <- sum(decision[1:(n/2)] == "promote")
+  }
+  mean(stats_sim < stat_obs)
+}
+```
+
+---
+
+#### Scenario A: two fixed margins
+```{r, scenarioA}
+simA <- function(n) {
+  gender <- rep(c("female", "male"), c(n/2, n/2))
+  decision <- sample(rep(c("promote", "no promote"), c(0.25 * n, 0.75 * n)))
+  matrix(c(gender, decision), ncol = 2)
+}
+```
+
+
+#### Scenario B: one fixed, one free
+```{r, scenarioB}
+simB <- function(n, pPromote) {
+  gender <- rep(c("female", "male"), c(n/2, n/2))
+  decision <- sample(c("promote", "no promote"), size = n,
+                     replace = TRUE, prob = c(pPromote, 1 - pPromote))
+  matrix(c(gender, decision), ncol = 2)
+}
+```
+
+
+---
+
+#### Scenario C: two free margins
+```{r, scenarioC}
+simC <- function(n, pPromote) {
+  gender <- sample(c("female", "male"), size = n,
+                   replace = TRUE, prob = c(.5, .5))
+  decision <- sample(c("promote", "no promote"), size = n,
+                     replace = TRUE, prob = c(pPromote, 1 - pPromote))
+  matrix(c(gender, decision), ncol = 2)
+}
+```
+
+---
+
+
+
+
