@@ -1,0 +1,33 @@
+---
+title: "Statistical methods for 2-by-2 tables: power considerations"
+author: "Brigid Wilson"
+date: "September 2014"
+output: html_document
+---
+
+For small sample sizes, the power differences are most notable and suggest that using Fisher's when both margins are not constrained will yield more false negatives than the exact test of proportions.  
+
+```{r powsim, cache = TRUE}
+library(statmod)
+pow.fisher = rep(NA, 126)
+pow.proptest = rep(NA, 126)
+set.seed(1234)
+
+for (i in 1:126){
+  n = i + 24
+	pow.fisher[i] = power.fisher.test(.28, .52, n, n, nsim = 1000)
+	pow.proptest[i] = power.prop.test(n, .28, .52, sig.level = .05, power = NULL, alternative = "two.sided")[['power']]
+}
+```
+
+```{r, fig.width = 6.5, fig.height = 4, echo=FALSE}
+
+plot(x = 25:150, y = pow.fisher, type = 'l', xlab = "Group size, n1 = n2", ylab = "Power, two-sided test, alpha = 0.05")
+points(x = 25:150, y = pow.proptest, type = 'l', col = "red")
+legend("bottomright", c("Fisher's Exact Test", "Test of Proportions"), col = c("black", "red"), lty = c(1,1))
+
+```
+
+This starts to address the consequences of using a method innappropriate to the data. Another extension assessing power through simulations in which the $P(Y)$ assumed for the null is (1) a fixed constant, (2) the observed proportion in the observed sample combining the two groups, or (3) a sampled value from a distribution with an expected value of the fixed constant used in (1). This is a more subtle consideration than "Are both margins fixed?", but might be interesting.
+
+Also: I haven't looked closely at how these two power functions are implemented in R--probably worth taking a closer look.
