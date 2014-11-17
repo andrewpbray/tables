@@ -1,0 +1,120 @@
+---
+title: "Further table-generating scenarios"
+author: "Brigid Wilson"
+date: "Monday, November 03, 2014"
+output: html_document
+---
+
+Aiming to look at further examples of data that exist as 2-by-2 (and hopefully will extend up to *j*-by-*k* tables where *j* and *k* are smallish integers indicating number of levels of qualitative variables). Starting with two that arise in work: case-control matched and pre-post assessments of a single population. 
+
+Again, want to identify the data-generating parameters, the valid tests, and the dangers of invalid tests on such data.
+
+First: case-control matched data. Let's assume a true conditional logistic OR of 2, not attempting to match on a confounder, merely to get a desired OR from off-diagonals.
+
+```{r}
+library(survival)
+makeccdat <- function(n){
+  x = rbinom(10*n, 1, .3)
+  b = log(2)
+  eta = b*x
+  p = exp(eta)/(1 + exp(eta))
+  y = rbinom(10*n, 1, p)
+  dat0 = data.frame(x, y)
+  ind.keep = c(sample(which(y == 0), n, replace = FALSE), c(sample(which(y == 1), n, replace = FALSE)))
+  dat = dat0[c(ind.keep),]
+  dat$id = rep(1:n, 2)
+  return(dat)
+}
+```
+Checking that, given very large sample size, this performs as expected.
+```{r}
+n = 100000
+dat = makeccdat(n)
+print(summary(clogit(y ~ x + strata(id), data = dat)))
+```
+Have seen conditional logistic power estimations online, run a few quick checks that I'm matching their results.
+Match sourceforge.net, ncases = ncontrols = 217 for 90% power to detect OR = 2 when 22% of controls are exposed.
+```{r, cache = TRUE}
+pvals = rep(NA, 1000)
+set.seed(1234)
+for (i in 1:1000){
+  tmpdat = makeccdat(217)
+  pvals[i] = summary(clogit(y ~ x + strata(id), data = tmpdat))$coef[5]
+}
+mean(pvals < .05)
+```
+Match sourceforge.net, ncases = ncontrols = 163 for 80% power.
+```{r}
+pvals = rep(NA, 1000)
+set.seed(1234)
+for (i in 1:1000){
+  tmpdat = makeccdat(163)
+  pvals[i] = summary(clogit(y ~ x + strata(id), data = tmpdat))$coef[5]
+}
+mean(pvals < .05)
+```
+When thinking 1:1 case-control matching, typically aiming to estimate an OR; when thinking pre-post paired measurements, typically thinking more about McNemar's. However, the two are using different parameterizations to test the equality of the off-diagonal counts (the "discordant pairs"). 
+
+Two questions: is one test more powerful than the other? And what kind of bias (or rate of false positives) is introduced by not testing without accounting for the paired/matched structure?
+
+Let's assume the same underlying effect and run: conditional logistic, McNemar's, unconditional logistic, and Chi-square tests. We'll start by simulating a single very large dataset from which we'll sample at increasing sizes.
+
+```{r, cache = TRUE}
+set.seed = 2345
+samp.sizes = seq(60, 300, 10)
+nn = max(samp.sizes)*100
+x = rbinom(nn, 1, .3)
+b = log(1.5)
+eta = b*x
+p = exp(eta)/(1 + exp(eta))
+y = rbinom(nn, 1, p)
+d = data.frame(x, y)
+
+runtests <- function(n){
+  ind.keep = c(sample(which(d$y == 0), n, replace = FALSE), c(sample(which(d$y == 1), n, replace = FALSE)))
+  dat = d[c(ind.keep),]
+  dat$id = rep(1:n, 2)
+  dat.wide = reshape(dat, timevar = "y", idvar = "id", direction = "wide")
+  clmod = clogit(y ~ x + strata(id), data = dat)
+  lmod = glm(y ~ x, family = "binomial", data = dat)
+  mcnpval = mcnemar.test(table(dat.wide$x.0, dat.wide$x.1))$p.value
+  clbeta = summary(clmod)$coef[1]
+  clpval = summary(clmod)$coef[5]
+  ulbeta = summary(lmod)$coef[2,1]
+  ulpval = summary(lmod)$coef[2,4] 
+  return(c(n = n, clbeta = clbeta, clpval = clpval, ulbeta = ulbeta, ulpval = ulpval, mcnpval = mcnpval))
+}
+
+resmat = matrix(NA, nrow = length(samp.sizes)*5000, ncol = 6)
+
+for (i in 1:length(samp.sizes)){
+  for (j in 1:5000){
+    resmat[5000*(i - 1) + j,] = runtests(samp.sizes[i])    
+  }
+}
+```
+```{r}
+pow.cl = tapply(resmat[,3], resmat[,1], function(x) mean(x < .05))
+pow.ul = tapply(resmat[,5], resmat[,1], function(x) mean(x < .05))
+pow.mc = tapply(resmat[,6], resmat[,1], function(x) mean(x < .05))
+
+
+power = data.frame(pow.cl, pow.ul, pow.mc)
+power$n = as.numeric(row.names(power))
+#power2 = reshape(power, varying = c("pow.cl", "pow.ul", "pow.mc", "pow.chi"), v.names = "Power", timevar = "models", times = c("Conditional Logistic", "Logistic", "McNemar's", "Chi-Square"), direction = "long")
+par(mfrow = c(1,1))
+plot(x = 2*power$n, y = power$pow.cl, type = "l", lty = 1,
+     main = "Statistical power of test", xlab = "Sample Size", ylab = "Power")
+points(x = 2*power$n, y = power$pow.mc, type = "l", lty = 3)
+legend("bottomright", c("Conditional Logistic", "McNemar's"), lty = c(1,3))
+
+bias.cl = tapply(resmat[,2], resmat[,1], function(x) mean(abs(x - b)))
+bias.ul = tapply(resmat[,4], resmat[,1], function(x) mean(abs(x - b)))
+bias = data.frame(bias.cl, bias.ul)
+bias$n = as.numeric(row.names(bias))
+
+check = makeccdat(50)
+check.wide = reshape(check, timevar = "y", idvar = "id", direction = "wide")
+
+```
+Next approach: matching on an underlying confounder? Presumably ignoring this would generate biased estimates?
